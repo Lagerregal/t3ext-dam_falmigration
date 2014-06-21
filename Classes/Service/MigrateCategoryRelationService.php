@@ -1,10 +1,10 @@
 <?php
-namespace TYPO3\CMS\DamFalmigration\Task;
+namespace TYPO3\CMS\DamFalmigration\Service;
 
 /***************************************************************
  *  Copyright notice
  *
- *  (c) 2013 Alexander Boehm <boehm@punkt.de>
+ *  (c) 2014 Stefan Froemken <froemken@gmail.com>
  *  All rights reserved
  *
  *  This script is part of the TYPO3 project. The TYPO3 project is
@@ -18,7 +18,6 @@ namespace TYPO3\CMS\DamFalmigration\Task;
  *  A copy is found in the textfile GPL.txt and important notices to the license
  *  from the author is found in LICENSE.txt distributed with these scripts.
  *
- *
  *  This script is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -26,54 +25,59 @@ namespace TYPO3\CMS\DamFalmigration\Task;
  *
  *  This copyright notice MUST APPEAR in all copies of the script!
  ***************************************************************/
+use TYPO3\CMS\Backend\Utility\BackendUtility;
+use TYPO3\CMS\Core\Messaging\FlashMessage;
 
 /**
- * Scheduler Task to Migrate Categories
- * Finds all DAM categories and adds a DB field "_migrateddamcatuid"
- * to each category record
- *
- * currently it does not take care of the sys_language_uid, so all categories
- * get default language uid.
- *
- * @author Alexander Boehm <boehm@punkt.de>
+ * Migrate DAM category relations to sys_category_record_mm
  */
-class MigrateDamCategoryRelationsTask extends AbstractTask {
+class MigrateCategoryRelationService extends AbstractService {
 
 	/**
-	 * main function, needs to return TRUE or FALSE in order to tell
-	 * the scheduler whether the task went through smoothly
+	 * main function
 	 *
-	 * @throws \Exception
 	 * @return boolean
+	 * @throws \Exception
 	 */
-	public function execute() {
-		$this->init();
+	public function start() {
+		$categoryRelations = $this->getCategoryRelationsWhereSysCategoryExists();
+		$amountOfMigratedRelations = 0;
+		echo 'Start migrating DAM category relations to sys_category_record_mm:' . PHP_EOL;
+		foreach ($categoryRelations as $categoryRelation) {
+			$insertData = array(
+				'uid_local' => $categoryRelation['sys_category_uid'],
+				'uid_foreign' => $this->getUidOfRelatedMetadata($categoryRelation['sys_file_uid']),
+				'sorting' => $categoryRelation['sorting'],
+				'sorting_foreign' => $categoryRelation['sorting_foreign'],
+				'tablenames' => 'sys_file_metadata',
+				'fieldname' => 'categories'
+			);
 
-		if ($this->isTableAvailable('tx_dam_mm_ref')) {
-			$categoryRelations = $this->getCategoryRelationsWhereSysCategoryExists();
-			foreach ($categoryRelations as $categoryRelation) {
-				$insertData = array(
-					'uid_local' => $categoryRelation['sys_category_uid'],
-					'uid_foreign' => $categoryRelation['sys_file_uid'],
-					'sorting' => $categoryRelation['sorting'],
-					'sorting_foreign' => $categoryRelation['sorting_foreign'],
-					'tablenames' => 'sys_file_metadata',
-					'fieldname' => 'categories'
+			if (!$this->checkIfSysCategoryRelationExists($categoryRelation)) {
+				$this->databaseConnection->exec_INSERTquery(
+					'sys_category_record_mm',
+					$insertData
 				);
-
-				if (!$this->checkIfSysCategoryRelationExists($categoryRelation)) {
-					$this->database->exec_INSERTquery(
-						'sys_category_record_mm',
-						$insertData
-					);
-					$this->amountOfMigratedRecords++;
-				}
+				echo '.';
+				$amountOfMigratedRelations++;
 			}
-			$this->addResultMessage();
-			return TRUE;
-		} else {
-			throw new \Exception('Table tx_dam_mm_ref not found. So there is nothing to migrate.');
 		}
+		echo PHP_EOL . 'We have migrated ' . $amountOfMigratedRelations . ' DAM category relations to sys_category_record_mm:' . PHP_EOL;
+	}
+
+	/**
+	 * get UID of Metadata of given sys_file-record
+	 *
+	 * @param integer $sysFile
+	 * @return integer The UID of sys_file_metadata
+	 */
+	protected function getUidOfRelatedMetadata($sysFile) {
+		$metadata = $this->databaseConnection->exec_SELECTgetSingleRow(
+			'uid',
+			'sys_file_metadata',
+			'file=' . (int)$sysFile
+		);
+		return $metadata['uid'];
 	}
 
 	/**
@@ -84,7 +88,7 @@ class MigrateDamCategoryRelationsTask extends AbstractTask {
 	 * @return array
 	 */
 	protected function getCategoryRelationsWhereSysCategoryExists() {
-		$rows = $this->database->exec_SELECTgetRows(
+		$rows = $this->databaseConnection->exec_SELECTgetRows(
 			'MM.*, SF.uid as sys_file_uid, SC.uid as sys_category_uid',
 			'tx_dam_mm_cat MM, sys_file SF, sys_category SC',
 			'SC._migrateddamcatuid = MM.uid_foreign AND SF._migrateddamuid = MM.uid_local'
@@ -103,12 +107,12 @@ class MigrateDamCategoryRelationsTask extends AbstractTask {
 	 * @return boolean
 	 */
 	protected function checkIfSysCategoryRelationExists(array $categoryRelation) {
-		$amountOfExistingRecords = $this->database->exec_SELECTcountRows(
+		$amountOfExistingRecords = $this->databaseConnection->exec_SELECTcountRows(
 			'*',
 			'sys_category_record_mm',
 			'uid_local = ' . $categoryRelation['sys_file_uid'] .
 			' AND uid_foreign = ' . $categoryRelation['sys_category_uid'] .
-			' AND tablenames = "sys_file"'
+			' AND tablenames = "sys_file_metadata"'
 		);
 		if ($amountOfExistingRecords) {
 			return TRUE;

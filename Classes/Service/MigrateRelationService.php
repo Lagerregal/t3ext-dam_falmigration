@@ -32,9 +32,9 @@ use TYPO3\CMS\Core\Messaging\FlashMessage;
  * Migrate DAM relations to FAL relations
  * right now this is dam_ttcontent, dam_uploads
  *
- * @author      Benjamin Mack <benni@typo3.org>
+ * @author Benjamin Mack <benni@typo3.org>
  */
-class MigrateRelations extends AbstractService {
+class MigrateRelationService extends AbstractService {
 
 	/**
 	 * @var \TYPO3\CMS\Core\Database\ReferenceIndex
@@ -45,54 +45,53 @@ class MigrateRelations extends AbstractService {
 	/**
 	 * main function
 	 *
+	 * @return void
 	 * @throws \Exception
-	 * @return FlashMessage
 	 */
-	public function execute() {
-		if ($this->isTableAvailable('tx_dam_mm_ref')) {
-			$damRelations = $this->getDamReferencesWhereSysFileExists();
-			foreach ($damRelations as $damRelation) {
-				$insertData = array(
-					'pid' => $this->getPidOfForeignRecord($damRelation),
-					'tstamp' => time(),
-					'crdate' => time(),
-					'cruser_id' => $GLOBALS['BE_USER']->user['uid'],
-					'sorting_foreign' => $damRelation['sorting_foreign'],
-					'uid_local' => $damRelation['sys_file_uid'],
-					'uid_foreign' => $damRelation['uid_foreign'],
-					'tablenames' => $damRelation['tablenames'],
-					'fieldname' => $this->getColForFieldName($damRelation),
-					'table_local' => 'sys_file',
-					'title' => $damRelation['title'],
-					'description' => $damRelation['description'],
-					'alternative' => $damRelation['alternative'],
+	public function start() {
+		$damRelations = $this->getDamReferencesWhereSysFileExists();
+		echo 'Start migrating the DAM relations of dam_content and dam_pages' . PHP_EOL;
+		$amountOfMigratedRecords = 0;
+		foreach ($damRelations as $damRelation) {
+			$insertData = array(
+				'pid' => $this->getPidOfForeignRecord($damRelation),
+				'tstamp' => time(),
+				'crdate' => time(),
+				'cruser_id' => (int)$GLOBALS['BE_USER']->user['uid'],
+				'sorting_foreign' => (int)$damRelation['sorting_foreign'],
+				'uid_local' => (int)$damRelation['sys_file_uid'],
+				'uid_foreign' => (int)$damRelation['uid_foreign'],
+				'tablenames' => (string)$damRelation['tablenames'],
+				'fieldname' => $this->getColForFieldName($damRelation),
+				'table_local' => 'sys_file',
+				'title' => $damRelation['title'],
+				'description' => $damRelation['description'],
+				'alternative' => $damRelation['alternative'],
+			);
+
+			if (!$this->checkIfSysFileRelationExists($damRelation)) {
+				$this->databaseConnection->exec_INSERTquery(
+					'sys_file_reference',
+					$insertData
 				);
+				$this->updateReferenceIndex($this->databaseConnection->sql_insert_id());
 
-				if (!$this->checkIfSysFileRelationExists($damRelation)) {
-					$this->database->exec_INSERTquery(
-						'sys_file_reference',
-						$insertData
-					);
-					$this->updateReferenceIndex($this->database->sql_insert_id());
-
-					// pageLayoutView-object needs image to be set something higher than 0
-					if ($damRelation['tablenames'] === 'tt_content' && $this->getColForFieldName($damRelation) === 'image') {
-						$tcaConfig = $GLOBALS['TCA']['tt_content']['columns']['image']['config'];
-						if ($tcaConfig['type'] === 'inline') {
-							$this->database->exec_UPDATEquery(
-								'tt_content',
-								'uid = ' . $damRelation['uid_foreign'],
-								array('image' => 1)
-							);
-						}
+				// pageLayoutView-object needs image to be set something higher than 0
+				if ($damRelation['tablenames'] === 'tt_content' && $this->getColForFieldName($damRelation) === 'image') {
+					$tcaConfig = $GLOBALS['TCA']['tt_content']['columns']['image']['config'];
+					if ($tcaConfig['type'] === 'inline') {
+						$this->databaseConnection->exec_UPDATEquery(
+							'tt_content',
+							'uid = ' . $damRelation['uid_foreign'],
+							array('image' => 1)
+						);
 					}
-					$this->amountOfMigratedRecords++;
 				}
+				echo '.';
+				$amountOfMigratedRecords++;
 			}
-			return $this->getResultMessage();
-		} else {
-			throw new \Exception('Extension tx_dam and dam_ttcontent is not installed. So there is nothing to migrate.');
 		}
+		echo PHP_EOL . 'We have migrated ' . $amountOfMigratedRecords . ' DAM Relations of dam_content and dam_pages to sys_file_record_mm' . PHP_EOL;
 	}
 
 	/**
@@ -119,7 +118,7 @@ class MigrateRelations extends AbstractService {
 	 * @return array
 	 */
 	protected function getDamReferencesWhereSysFileExists() {
-		$rows = $this->database->exec_SELECTgetRows(
+		$rows = $this->databaseConnection->exec_SELECTgetRows(
 			'MM.*, SF.uid as sys_file_uid, MD.title, MD.description, MD.alternative',
 			'tx_dam_mm_ref MM, sys_file SF, sys_file_metadata MD',
 			'MD.file = SF.uid AND SF._migrateddamuid = MM.uid_local'
@@ -138,13 +137,13 @@ class MigrateRelations extends AbstractService {
 	 * @return boolean
 	 */
 	protected function checkIfSysFileRelationExists(array $damRelation) {
-		$amountOfExistingRecords = $this->database->exec_SELECTcountRows(
+		$amountOfExistingRecords = $this->databaseConnection->exec_SELECTcountRows(
 			'*',
 			'sys_file_reference',
 			'uid_local = ' . $damRelation['sys_file_uid'] .
 			' AND uid_foreign = ' . $damRelation['uid_foreign'] .
-			' AND tablenames = ' . $this->database->fullQuoteStr($damRelation['tablenames'], 'sys_file_reference') .
-			' AND fieldname = ' . $this->database->fullQuoteStr($this->getColForFieldName($damRelation), 'sys_file_reference') .
+			' AND tablenames = ' . $this->databaseConnection->fullQuoteStr($damRelation['tablenames'], 'sys_file_reference') .
+			' AND fieldname = ' . $this->databaseConnection->fullQuoteStr($this->getColForFieldName($damRelation), 'sys_file_reference') .
 			' AND deleted = 0'
 		);
 		if ($amountOfExistingRecords) {

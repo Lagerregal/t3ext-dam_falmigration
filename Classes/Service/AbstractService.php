@@ -38,15 +38,15 @@ use TYPO3\CMS\Extbase\Utility\LocalizationUtility;
 abstract class AbstractService {
 
 	/**
-	 * @inject
 	 * @var \TYPO3\CMS\Extbase\Object\ObjectManager
+	 * @inject
 	 */
 	protected $objectManager;
 
 	/**
 	 * @var \TYPO3\CMS\Core\Database\DatabaseConnection
 	 */
-	protected $database;
+	protected $databaseConnection;
 
 	/**
 	 * @inject
@@ -73,7 +73,7 @@ abstract class AbstractService {
 	 * initializes this object
 	 */
 	public function initializeObject() {
-		$this->database = $GLOBALS['TYPO3_DB'];
+		$this->databaseConnection = $GLOBALS['TYPO3_DB'];
 		$fileFactory = ResourceFactory::getInstance();
 		$this->storageObject = $fileFactory->getStorageObject($this->storageUid);
 	}
@@ -82,30 +82,12 @@ abstract class AbstractService {
 	 * check if given table exists in current database
 	 * we can't check TCA or for installed extensions because dam and dam_ttcontent are not available for TYPO3 6.2
 	 *
-	 * @param $table
+	 * @param string $table
 	 * @return bool
 	 */
 	protected function isTableAvailable($table) {
-		$tables = $this->database->admin_get_tables();
+		$tables = $this->databaseConnection->admin_get_tables();
 		return array_key_exists($table, $tables);
-	}
-
-	/**
-	 * add flashmessage if migration was successful or not.
-	 *
-	 * @return FlashMessage
-	 */
-	protected function getResultMessage() {
-		if ($this->amountOfMigratedRecords > 0) {
-			$headline = LocalizationUtility::translate('migrationSuccessful', 'dam_falmigration');
-			$message = LocalizationUtility::translate('migratedFiles', 'dam_falmigration', array(0 => $this->amountOfMigratedRecords));
-		} else {
-			$headline = LocalizationUtility::translate('migrationNotNecessary', 'dam_falmigration');;
-			$message = LocalizationUtility::translate('allFilesMigrated', 'dam_falmigration');
-		}
-
-		$messageObject = GeneralUtility::makeInstance('TYPO3\\CMS\\Core\\Messaging\\FlashMessage', $message, $headline);
-		return $messageObject;
 	}
 
 }

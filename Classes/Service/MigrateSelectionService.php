@@ -1,10 +1,10 @@
 <?php
-namespace TYPO3\CMS\DamFalmigration\Task;
+namespace TYPO3\CMS\DamFalmigration\Service;
 
 /***************************************************************
  *  Copyright notice
  *
- *  (c) 2013 Frans Saris <franssaris@gmail.com>
+ *  (c) 2014 Stefan Froemken <froemken@gmail.com>
  *  All rights reserved
  *
  *  This script is part of the TYPO3 project. The TYPO3 project is
@@ -25,51 +25,51 @@ namespace TYPO3\CMS\DamFalmigration\Task;
  *
  *  This copyright notice MUST APPEAR in all copies of the script!
  ***************************************************************/
-use TYPO3\CMS\Core\Utility\GeneralUtility;
+use TYPO3\CMS\Backend\Utility\BackendUtility;
+use TYPO3\CMS\Core\Messaging\FlashMessage;
 
-class MigrateDamSelectionsTask extends AbstractTask {
+/**
+ * Migrate DAM category relations to sys_category_record_mm
+ */
+class MigrateSelectionService extends AbstractService {
 
 	/**
-	 * main function, needs to return TRUE or FALSE in order to tell
-	 * the scheduler whether the task went through smoothly
+	 * main function
 	 *
 	 * @return boolean
 	 */
-	public function execute() {
-		$this->init();
-
+	public function start() {
 		$damSelections = $this->getNotMigratedDamSelections();
 
 		// search for txdamFolder and create new folder based sys_file_collection
+		echo 'Start migrating DAM selections to sys_file_collection' . PHP_EOL;
+		$amountOfMigratedRecords = 0;
 		foreach ($damSelections as $damSelection) {
 			$damFolder = $this->getDamFolder($damSelection);
 			if ($damFolder !== FALSE) {
 				$damFolder = substr($damFolder, strpos($damFolder, '/fileadmin') + 10);
 
 				$sysFileCollection = array(
-					'pid' => $damSelection['pid'],
-					'tstamp' => $damSelection['tstamp'],
-					'crdate' => $damSelection['crdate'],
-					'cruser_id' => $damSelection['cruser_id'],
-					'hidden' => $damSelection['hidden'],
-					'starttime' => $damSelection['starttime'],
-					'endtime' => $damSelection['endtime'],
-					'title' => $damSelection['title'],
+					'pid' => (int)$damSelection['pid'],
+					'tstamp' => (int)$damSelection['tstamp'],
+					'crdate' => (int)$damSelection['crdate'],
+					'cruser_id' => (int)$damSelection['cruser_id'],
+					'hidden' => (int)$damSelection['hidden'],
+					'starttime' => (int)$damSelection['starttime'],
+					'endtime' => (int)$damSelection['endtime'],
+					'title' => (string)$damSelection['title'],
 					'storage' => 1,
-					'description' => $damSelection['description'],
+					'description' => (string)$damSelection['description'],
 					'type' => 'folder',
-					'folder' => $damFolder,
-					'_migrateddamselectionuid' => $damSelection['uid']
+					'folder' => (string)$damFolder,
+					'_migrateddamselectionuid' => (int)$damSelection['uid']
 				);
-				$this->database->exec_INSERTquery('sys_file_collection', $sysFileCollection);
-
-				$this->amountOfMigratedRecords++;
+				$this->databaseConnection->exec_INSERTquery('sys_file_collection', $sysFileCollection);
+				echo '.';
+				$amountOfMigratedRecords++;
 			}
 		}
-		
-		$this->addResultMessage();
-		
-		return TRUE;
+		echo PHP_EOL . 'We have migrated ' . $amountOfMigratedRecords . ' DAM selections into sys_file_collection' . PHP_EOL;
 	}
 
 	/**
@@ -98,7 +98,7 @@ class MigrateDamSelectionsTask extends AbstractTask {
 	 * @return string
 	 */
 	protected function getUidListOfAlreadyMigratedSelections() {
-		list($migratedRecords) = $this->database->exec_SELECTgetRows(
+		list($migratedRecords) = $this->databaseConnection->exec_SELECTgetRows(
 			'GROUP_CONCAT( _migrateddamselectionuid ) AS uidList',
 			'sys_file_collection',
 			'_migrateddamselectionuid > 0 AND deleted = 0'
@@ -128,7 +128,7 @@ class MigrateDamSelectionsTask extends AbstractTask {
 	 * @return array
 	 */
 	protected function getNotMigratedDamSelections() {
-		$rows = $this->database->exec_SELECTgetRows(
+		$rows = $this->databaseConnection->exec_SELECTgetRows(
 			'*',
 			'tx_dam_selection',
 			'type = 0 AND deleted = 0 ' . $this->getAdditionalWhereClauseForNotMigratedDamSelections()
